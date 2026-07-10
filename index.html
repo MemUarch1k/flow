@@ -200,8 +200,8 @@
 
 <script>
     // ================================================================
-    //  FLOW — ПРАВИЛЬНАЯ ГЕНЕРАЦИЯ УРОВНЕЙ
-    //  Алгоритм: строим путь, потом добавляем препятствия
+    //  FLOW — ГАРАНТИРОВАННО РЕШАЕМЫЕ УРОВНИ
+    //  Алгоритм: строим путь, потом проверяем, что его можно пройти
     // ================================================================
 
     (function() {
@@ -225,54 +225,83 @@
         const stepsDisplay = document.getElementById('stepsDisplay');
         const gameStatusSpan = document.getElementById('gameStatus');
 
-        // ---- ГЕНЕРАЦИЯ УРОВНЯ (ГАРАНТИРОВАННО РЕШАЕМЫЙ) ----
+        // ---- ГЕНЕРАЦИЯ УРОВНЯ (с проверкой) ----
         function generateLevel() {
             size = Math.floor(Math.random() * (MAX_SIZE - MIN_SIZE + 1)) + MIN_SIZE;
             board = Array.from({ length: size }, () => Array(size).fill(0));
 
-            // 1. Строим путь, проходящий через все клетки
-            //    Простой алгоритм: змейка
-            let path = [];
-            for (let r = 0; r < size; r++) {
-                if (r % 2 === 0) {
-                    for (let c = 0; c < size; c++) {
-                        path.push({r, c});
-                    }
-                } else {
-                    for (let c = size - 1; c >= 0; c--) {
-                        path.push({r, c});
-                    }
-                }
-            }
-
-            // 2. Выбираем старт и финиш (концы пути)
-            start = path[0];
-            end = path[path.length - 1];
-
-            // 3. Отмечаем путь на поле
-            for (let p of path) {
-                board[p.r][p.c] = 2; // путь
-            }
-            board[start.r][start.c] = 3; // старт
-            board[end.r][end.c] = 4; // финиш
-
-            // 4. Добавляем случайные препятствия (не больше 10%)
-            const blockCount = Math.floor(size * size * 0.1);
-            let placed = 0;
+            let valid = false;
             let attempts = 0;
-            while (placed < blockCount && attempts < 100) {
-                const r = Math.floor(Math.random() * size);
-                const c = Math.floor(Math.random() * size);
+            while (!valid && attempts < 50) {
                 attempts++;
-                // Не блокируем старт, финиш и соседние клетки (чтобы не сломать решение)
-                if (board[r][c] === 2 && !(r === start.r && c === start.c) && !(r === end.r && c === end.c)) {
-                    const hasStartNeighbor = isAdjacentTo(r, c, start.r, start.c);
-                    const hasEndNeighbor = isAdjacentTo(r, c, end.r, end.c);
-                    if (!hasStartNeighbor && !hasEndNeighbor) {
-                        board[r][c] = 1; // препятствие
-                        placed++;
+                board = Array.from({ length: size }, () => Array(size).fill(0));
+
+                // Строим простой путь "змейкой" через все клетки
+                let path = [];
+                for (let r = 0; r < size; r++) {
+                    if (r % 2 === 0) {
+                        for (let c = 0; c < size; c++) path.push({r, c});
+                    } else {
+                        for (let c = size - 1; c >= 0; c--) path.push({r, c});
                     }
                 }
+
+                // Перемешиваем путь (делаем его не таким прямолинейным)
+                if (size > 5) {
+                    for (let i = 0; i < path.length; i += 2) {
+                        if (i + 1 < path.length && Math.random() > 0.6) {
+                            const temp = path[i];
+                            path[i] = path[i + 1];
+                            path[i + 1] = temp;
+                        }
+                    }
+                }
+
+                start = path[0];
+                end = path[path.length - 1];
+
+                for (let p of path) {
+                    board[p.r][p.c] = 2;
+                }
+                board[start.r][start.c] = 3;
+                board[end.r][end.c] = 4;
+
+                // Добавляем препятствия
+                const blockCount = Math.floor(size * size * (0.05 + Math.random() * 0.1));
+                let placed = 0;
+                let blockAttempts = 0;
+                while (placed < blockCount && blockAttempts < 200) {
+                    blockAttempts++;
+                    const r = Math.floor(Math.random() * size);
+                    const c = Math.floor(Math.random() * size);
+                    if (board[r][c] === 2 && !(r === start.r && c === start.c) && !(r === end.r && c === end.c)) {
+                        // Проверяем, что этот блок не отрезает путь
+                        board[r][c] = 0; // временно убираем
+                        // Проверяем, можно ли пройти от старта до финиша
+                        const hasPath = hasValidPath();
+                        if (hasPath) {
+                            board[r][c] = 1; // ставим блок
+                            placed++;
+                        } else {
+                            board[r][c] = 2; // возвращаем
+                        }
+                    }
+                }
+
+                // Проверяем, что все клетки заполнены или заблокированы
+                let allCovered = true;
+                for (let r = 0; r < size; r++) {
+                    for (let c = 0; c < size; c++) {
+                        if (board[r][c] === 0) allCovered = false;
+                    }
+                }
+                valid = allCovered;
+            }
+
+            // Если не удалось — перезапускаем генерацию
+            if (!valid) {
+                generateLevel();
+                return;
             }
 
             steps = 0;
@@ -283,8 +312,28 @@
             gameStatusSpan.innerHTML = "🌀 ТЯНИ ЛИНИЮ ОТ ЗЕЛЁНОЙ К КРАСНОЙ";
         }
 
-        function isAdjacentTo(r, c, tr, tc) {
-            return (Math.abs(r - tr) + Math.abs(c - tc)) === 1;
+        // ---- ПРОВЕРКА, ЕСТЬ ЛИ ПУТЬ ОТ СТАРТА ДО ФИНИША ----
+        function hasValidPath() {
+            const visited = new Set();
+            const queue = [{r: start.r, c: start.c}];
+            while (queue.length > 0) {
+                const {r, c} = queue.shift();
+                const key = `${r},${c}`;
+                if (visited.has(key)) continue;
+                visited.add(key);
+                if (r === end.r && c === end.c) return true;
+                const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+                for (const d of dirs) {
+                    const nr = r + d[0];
+                    const nc = c + d[1];
+                    if (nr < 0 || nr >= size || nc < 0 || nc >= size) continue;
+                    if (board[nr][nc] === 1 || board[nr][nc] === 0) continue;
+                    if (!visited.has(`${nr},${nc}`)) {
+                        queue.push({r: nr, c: nc});
+                    }
+                }
+            }
+            return false;
         }
 
         // ---- ОТРИСОВКА ----
@@ -323,7 +372,6 @@
             isDrawing = true;
             pathCells = [{r, c}];
 
-            // Очищаем старый путь (сохраняем старт и финиш)
             for (let i = 0; i < size; i++) {
                 for (let j = 0; j < size; j++) {
                     if (board[i][j] === 2) board[i][j] = 0;
@@ -349,7 +397,6 @@
             if (!isAdjacent) return;
             if (pathCells.some(p => p.r === r && p.c === c)) return;
 
-            // Если это финиш
             if (board[r][c] === 4) {
                 pathCells.push({r, c});
                 board[r][c] = 2;
@@ -368,7 +415,6 @@
 
         function finishDrawing() {
             isDrawing = false;
-
             const last = pathCells[pathCells.length - 1];
             if (!last) return;
 
@@ -414,7 +460,6 @@
             gameStatusSpan.innerHTML = "🌀 НАЧНИ ЗАНОВО";
         }
 
-        // ---- ПОДСКАЗКА ----
         function showHint() {
             if (isComplete) return;
             for (let r = 0; r < size; r++) {
@@ -441,7 +486,6 @@
             gameStatusSpan.innerHTML = "😅 НЕТ ДОСТУПНЫХ КЛЕТОК";
         }
 
-        // ---- ОБРАБОТЧИКИ СОБЫТИЙ ----
         function setupEvents() {
             boardEl.addEventListener('mousedown', (e) => {
                 const cell = e.target.closest('.cell');
@@ -490,13 +534,11 @@
             });
         }
 
-        // ---- UI ----
         function updateUI() {
             levelDisplay.textContent = level;
             stepsDisplay.textContent = steps;
         }
 
-        // ---- ИНИЦИАЛИЗАЦИЯ ----
         function init() {
             generateLevel();
             setupEvents();
