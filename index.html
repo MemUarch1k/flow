@@ -200,10 +200,8 @@
 
 <script>
     // ================================================================
-    //  СВЯЖИ ТОЧКИ (FLOW) — УПРОЩЁННАЯ ВЕРСИЯ
-    //  - Одна линия
-    //  - Заполни все клетки
-    //  - Автогенерация уровней
+    //  СВЯЖИ ТОЧКИ (FLOW) — С ПРОВЕДЕНИЕМ ЛИНИИ
+    //  Зажимаешь на старте, тянешь по клеткам, отпускаешь
     // ================================================================
 
     (function() {
@@ -220,6 +218,8 @@
         let end = null;
         let isComplete = false;
         let isLocked = false;
+        let isDrawing = false;
+        let pathCells = [];
 
         const boardEl = document.getElementById('board');
         const levelDisplay = document.getElementById('levelDisplay');
@@ -228,11 +228,10 @@
 
         // ---- ГЕНЕРАЦИЯ УРОВНЯ ----
         function generateLevel() {
-            // Определяем размер
             size = Math.floor(Math.random() * (MAX_SIZE - MIN_SIZE + 1)) + MIN_SIZE;
             board = Array.from({ length: size }, () => Array(size).fill(0));
 
-            // Добавляем случайные препятствия (не слишком много)
+            // Препятствия
             const blockCount = Math.floor(size * size * 0.08);
             let placed = 0;
             while (placed < blockCount) {
@@ -244,7 +243,7 @@
                 }
             }
 
-            // Выбираем старт и финиш (на краях)
+            // Старт и финиш на краях
             const freeEdges = [];
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
@@ -255,18 +254,13 @@
             }
 
             if (freeEdges.length < 2) {
-                // Если нет краевых клеток — берём любые свободные
                 const free = [];
                 for (let r = 0; r < size; r++) {
                     for (let c = 0; c < size; c++) {
                         if (board[r][c] === 0) free.push({r, c});
                     }
                 }
-                if (free.length < 2) {
-                    // Если совсем нет — перегенерируем
-                    generateLevel();
-                    return;
-                }
+                if (free.length < 2) { generateLevel(); return; }
                 start = free[0];
                 end = free[free.length - 1];
             } else {
@@ -277,17 +271,16 @@
                 }
             }
 
-            // Отмечаем на поле
-            board[start.r][start.c] = 3; // старт
-            board[end.r][end.c] = 4; // финиш
+            board[start.r][start.c] = 3;
+            board[end.r][end.c] = 4;
 
-            // Начальный путь — только старт
             steps = 0;
             isComplete = false;
             isLocked = false;
+            pathCells = [];
             render();
             updateUI();
-            gameStatusSpan.innerHTML = "🌀 ПРОВЕДИ ЛИНИЮ ОТ ТОЧКИ ДО ТОЧКИ";
+            gameStatusSpan.innerHTML = "🌀 ТЯНИ ЛИНИЮ ОТ ЗЕЛЁНОЙ К КРАСНОЙ";
         }
 
         // ---- ОТРИСОВКА ----
@@ -312,19 +305,96 @@
                     else if (val === 4) cell.classList.add('end');
                     else if (val === 2) cell.classList.add('path');
 
-                    cell.addEventListener('click', () => onCellClick(r, c));
+                    // События для рисования
+                    cell.addEventListener('mousedown', (e) => onCellDown(r, c, e));
+                    cell.addEventListener('mouseenter', (e) => onCellEnter(r, c, e));
+                    cell.addEventListener('mouseup', (e) => onCellUp(r, c, e));
+
+                    cell.addEventListener('touchstart', (e) => onCellDown(r, c, e));
+                    cell.addEventListener('touchmove', (e) => onCellTouchMove(r, c, e));
+                    cell.addEventListener('touchend', (e) => onCellUp(r, c, e));
+
                     boardEl.appendChild(cell);
                 }
             }
         }
 
-        // ---- КЛИК ПО КЛЕТКЕ ----
-        function onCellClick(r, c) {
-            if (isLocked || isComplete) return;
-            if (board[r][c] === 1) return; // заблокировано
+        // ---- РИСОВАНИЕ ЛИНИИ ----
+        function onCellDown(r, c, e) {
+            if (isComplete || isLocked) return;
+            if (board[r][c] === 1) return;
 
-            // Если это финиш — проверяем завершение
-            if (r === end.r && c === end.c) {
+            // Начинаем рисование только со старта
+            if (board[r][c] === 3) {
+                isDrawing = true;
+                pathCells = [{r, c}];
+                clearPath();
+                board[r][c] = 3;
+                steps = 0;
+                updateUI();
+                render();
+            }
+            e.preventDefault();
+        }
+
+        function onCellEnter(r, c, e) {
+            if (!isDrawing || isComplete || isLocked) return;
+            if (board[r][c] === 1) return;
+            if (board[r][c] === 4) {
+                // Попытка завершить линию
+                finishLine();
+                return;
+            }
+
+            const last = pathCells[pathCells.length - 1];
+            if (!last) return;
+
+            // Проверяем, что клетка соседняя (по горизонтали или вертикали)
+            const dr = Math.abs(r - last.r);
+            const dc = Math.abs(c - last.c);
+            if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+                if (!pathCells.some(p => p.r === r && p.c === c)) {
+                    pathCells.push({r, c});
+                    board[r][c] = 2;
+                    steps++;
+                    updateUI();
+                    render();
+                }
+            }
+            e.preventDefault();
+        }
+
+        function onCellTouchMove(r, c, e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (target && target.classList.contains('cell')) {
+                const rr = parseInt(target.dataset.r);
+                const cc = parseInt(target.dataset.c);
+                if (!isNaN(rr) && !isNaN(cc)) {
+                    onCellEnter(rr, cc, e);
+                }
+            }
+        }
+
+        function onCellUp(r, c, e) {
+            if (isDrawing) {
+                finishLine();
+                isDrawing = false;
+            }
+            e.preventDefault();
+        }
+
+        function finishLine() {
+            isDrawing = false;
+            if (pathCells.length < 2) {
+                gameStatusSpan.innerHTML = "⚠️ ЛИНИЯ СЛИШКОМ КОРОТКАЯ";
+                return;
+            }
+
+            // Проверяем, что финиш достигнут
+            const last = pathCells[pathCells.length - 1];
+            if (last.r === end.r && last.c === end.c) {
                 if (isAllFilled()) {
                     isComplete = true;
                     gameStatusSpan.innerHTML = "🎉 УРОВЕНЬ ПРОЙДЕН!";
@@ -335,38 +405,21 @@
                 } else {
                     gameStatusSpan.innerHTML = "❌ НЕ ВСЕ КЛЕТКИ ЗАПОЛНЕНЫ!";
                 }
-                return;
+            } else {
+                gameStatusSpan.innerHTML = "❌ НУЖНО ДОЙТИ ДО КРАСНОЙ ТОЧКИ!";
             }
-
-            // Если клетка уже часть пути — игнорируем
-            if (board[r][c] === 2 || board[r][c] === 3 || board[r][c] === 4) return;
-
-            // Добавляем клетку в путь
-            board[r][c] = 2;
-            steps++;
-            updateUI();
             render();
-
-            // Проверяем, не тупик ли это
-            if (!hasFreeNeighbor(r, c)) {
-                gameStatusSpan.innerHTML = "⚠️ ТУПИК! НАЧНИ ЗАНОВО";
-                isLocked = true;
-                setTimeout(() => {
-                    isLocked = false;
-                    resetLevel();
-                }, 700);
-            }
         }
 
-        function hasFreeNeighbor(r, c) {
-            const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
-            for (const d of dirs) {
-                const nr = r + d[0];
-                const nc = c + d[1];
-                if (nr < 0 || nr >= size || nc < 0 || nc >= size) continue;
-                if (board[nr][nc] === 0) return true;
+        // ---- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----
+        function clearPath() {
+            for (let r = 0; r < size; r++) {
+                for (let c = 0; c < size; c++) {
+                    if (board[r][c] === 2) board[r][c] = 0;
+                }
             }
-            return false;
+            board[start.r][start.c] = 3;
+            board[end.r][end.c] = 4;
         }
 
         function isAllFilled() {
@@ -381,8 +434,6 @@
         // ---- ПОДСКАЗКА ----
         function showHint() {
             if (isComplete) return;
-
-            // Ищем первую свободную клетку рядом с путём
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
                     if (board[r][c] === 2 || board[r][c] === 3) {
@@ -392,7 +443,6 @@
                             const nc = c + d[1];
                             if (nr < 0 || nr >= size || nc < 0 || nc >= size) continue;
                             if (board[nr][nc] === 0) {
-                                // Подсвечиваем клетку
                                 const cells = boardEl.querySelectorAll('.cell');
                                 cells.forEach(cell => {
                                     if (parseInt(cell.dataset.r) === nr && parseInt(cell.dataset.c) === nc) {
@@ -412,17 +462,13 @@
 
         // ---- СБРОС ----
         function resetLevel() {
-            // Убираем путь, оставляем старт и финиш
-            for (let r = 0; r < size; r++) {
-                for (let c = 0; c < size; c++) {
-                    if (board[r][c] === 2) board[r][c] = 0;
-                }
-            }
+            clearPath();
             board[start.r][start.c] = 3;
             board[end.r][end.c] = 4;
             steps = 0;
             isComplete = false;
             isLocked = false;
+            pathCells = [];
             updateUI();
             render();
             gameStatusSpan.innerHTML = "🌀 НАЧНИ ЗАНОВО";
@@ -441,7 +487,6 @@
             document.getElementById('resetBtn').addEventListener('click', resetLevel);
             document.getElementById('hintBtn').addEventListener('click', showHint);
 
-            // Адаптация размера поля
             window.addEventListener('resize', render);
         }
 
