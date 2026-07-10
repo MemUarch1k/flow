@@ -112,15 +112,15 @@
             background: #3498db;
         }
 
-        .cell.path.start {
-            background: #2ecc71;
-        }
-        .cell.path.end {
-            background: #e74c3c;
+        .cell.highlight {
+            background: #f39c12 !important;
+            animation: pulse 0.5s ease;
         }
 
-        .cell.highlight {
-            background: #2a2f3e;
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
         }
 
         .controls {
@@ -200,26 +200,26 @@
 
 <script>
     // ================================================================
-    //  СВЯЖИ ТОЧКИ (FLOW) — ОДНА ЛИНИЯ, ЗАПОЛНИ ВСЕ КЛЕТКИ
-    //  Автогенерация уровней, тёмный дизайн, рекорды
+    //  СВЯЖИ ТОЧКИ (FLOW) — УПРОЩЁННАЯ ВЕРСИЯ
+    //  - Одна линия
+    //  - Заполни все клетки
+    //  - Автогенерация уровней
     // ================================================================
 
     (function() {
         'use strict';
 
         const MIN_SIZE = 5;
-        const MAX_SIZE = 9;
+        const MAX_SIZE = 7;
 
         let board = [];
         let size = 5;
         let level = 1;
         let steps = 0;
-        let path = [];
         let start = null;
         let end = null;
         let isComplete = false;
         let isLocked = false;
-        let hintCount = 0;
 
         const boardEl = document.getElementById('board');
         const levelDisplay = document.getElementById('levelDisplay');
@@ -228,115 +228,66 @@
 
         // ---- ГЕНЕРАЦИЯ УРОВНЯ ----
         function generateLevel() {
-            // Определяем размер поля (рандомно)
+            // Определяем размер
             size = Math.floor(Math.random() * (MAX_SIZE - MIN_SIZE + 1)) + MIN_SIZE;
-            // Сложность растёт с уровнем
-            const complexity = Math.min(level, 3);
-
             board = Array.from({ length: size }, () => Array(size).fill(0));
 
-            // Заполняем случайными препятствиями (блокированные клетки)
-            const blockCount = Math.floor(size * size * (0.05 + complexity * 0.05));
-            let blocked = 0;
-            while (blocked < blockCount) {
+            // Добавляем случайные препятствия (не слишком много)
+            const blockCount = Math.floor(size * size * 0.08);
+            let placed = 0;
+            while (placed < blockCount) {
                 const r = Math.floor(Math.random() * size);
                 const c = Math.floor(Math.random() * size);
                 if (board[r][c] === 0) {
-                    board[r][c] = 1; // 1 = заблокировано
-                    blocked++;
+                    board[r][c] = 1;
+                    placed++;
                 }
             }
 
-            // Генерируем путь
-            let pathCells = generatePath();
-            while (!pathCells) {
-                // Если не удалось сгенерировать путь — перегенерируем
-                board = Array.from({ length: size }, () => Array(size).fill(0));
-                pathCells = generatePath();
-            }
-
-            // Отрисовываем
-            render();
-            updateUI();
-        }
-
-        function generatePath() {
-            // Ищем старт и финиш (крайние клетки)
-            const startCandidates = [];
-            const endCandidates = [];
-
-            // Простые случаи: углы или края
+            // Выбираем старт и финиш (на краях)
+            const freeEdges = [];
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
-                    if (board[r][c] === 1) continue;
-                    const edge = (r === 0 || r === size - 1 || c === 0 || c === size - 1);
-                    if (edge) {
-                        if (startCandidates.length < 3) startCandidates.push({r, c});
-                        else endCandidates.push({r, c});
+                    if (board[r][c] === 0 && (r === 0 || r === size - 1 || c === 0 || c === size - 1)) {
+                        freeEdges.push({r, c});
                     }
                 }
             }
 
-            if (startCandidates.length === 0 || endCandidates.length === 0) {
-                // Если нет краевых клеток — берём любые
+            if (freeEdges.length < 2) {
+                // Если нет краевых клеток — берём любые свободные
                 const free = [];
                 for (let r = 0; r < size; r++) {
                     for (let c = 0; c < size; c++) {
                         if (board[r][c] === 0) free.push({r, c});
                     }
                 }
-                if (free.length < 2) return null;
+                if (free.length < 2) {
+                    // Если совсем нет — перегенерируем
+                    generateLevel();
+                    return;
+                }
                 start = free[0];
                 end = free[free.length - 1];
             } else {
-                start = startCandidates[0];
-                end = endCandidates[Math.floor(Math.random() * endCandidates.length)];
-                if (!end) end = endCandidates[0];
-            }
-
-            // Строим путь (простой алгоритм — обход клеток)
-            path = [];
-            const visited = new Set();
-            const queue = [{r: start.r, c: start.c, path: [{r: start.r, c: start.c}]}];
-
-            while (queue.length > 0) {
-                const current = queue.shift();
-                const key = `${current.r},${current.c}`;
-                if (visited.has(key)) continue;
-                visited.add(key);
-
-                if (current.r === end.r && current.c === end.c) {
-                    path = current.path;
-                    break;
-                }
-
-                const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
-                for (const d of dirs) {
-                    const nr = current.r + d[0];
-                    const nc = current.c + d[1];
-                    if (nr < 0 || nr >= size || nc < 0 || nc >= size) continue;
-                    if (board[nr][nc] === 1) continue;
-                    if (visited.has(`${nr},${nc}`)) continue;
-                    const newPath = [...current.path, {r: nr, c: nc}];
-                    queue.push({r: nr, c: nc, path: newPath});
+                start = freeEdges[0];
+                end = freeEdges[Math.floor(Math.random() * freeEdges.length)];
+                if (!end || (start.r === end.r && start.c === end.c)) {
+                    end = freeEdges[freeEdges.length - 1];
                 }
             }
 
-            if (path.length < size * 2) {
-                // Путь слишком короткий — перегенерируем
-                return null;
-            }
+            // Отмечаем на поле
+            board[start.r][start.c] = 3; // старт
+            board[end.r][end.c] = 4; // финиш
 
-            // Помечаем путь на поле
-            for (const p of path) {
-                board[p.r][p.c] = 2; // 2 = путь
-            }
-
-            // Старт и финиш
-            board[start.r][start.c] = 3; // 3 = старт
-            board[end.r][end.c] = 4; // 4 = финиш
-
-            return path;
+            // Начальный путь — только старт
+            steps = 0;
+            isComplete = false;
+            isLocked = false;
+            render();
+            updateUI();
+            gameStatusSpan.innerHTML = "🌀 ПРОВЕДИ ЛИНИЮ ОТ ТОЧКИ ДО ТОЧКИ";
         }
 
         // ---- ОТРИСОВКА ----
@@ -370,25 +321,25 @@
         // ---- КЛИК ПО КЛЕТКЕ ----
         function onCellClick(r, c) {
             if (isLocked || isComplete) return;
-            if (board[r][c] === 1) return;
+            if (board[r][c] === 1) return; // заблокировано
 
-            // Если клетка уже часть пути — ничего не делаем
-            if (board[r][c] === 2 || board[r][c] === 3 || board[r][c] === 4) return;
-
-            // Если это финиш — проверяем, что путь завершён
+            // Если это финиш — проверяем завершение
             if (r === end.r && c === end.c) {
-                if (isPathComplete()) {
+                if (isAllFilled()) {
                     isComplete = true;
                     gameStatusSpan.innerHTML = "🎉 УРОВЕНЬ ПРОЙДЕН!";
                     setTimeout(() => {
                         level++;
                         generateLevel();
-                    }, 1000);
+                    }, 800);
                 } else {
                     gameStatusSpan.innerHTML = "❌ НЕ ВСЕ КЛЕТКИ ЗАПОЛНЕНЫ!";
                 }
                 return;
             }
+
+            // Если клетка уже часть пути — игнорируем
+            if (board[r][c] === 2 || board[r][c] === 3 || board[r][c] === 4) return;
 
             // Добавляем клетку в путь
             board[r][c] = 2;
@@ -396,14 +347,14 @@
             updateUI();
             render();
 
-            // Проверяем, не тупик ли это (нет соседних свободных клеток)
+            // Проверяем, не тупик ли это
             if (!hasFreeNeighbor(r, c)) {
-                gameStatusSpan.innerHTML = "⚠️ ТУПИК! ПОПРОБУЙ ЗАНОВО";
+                gameStatusSpan.innerHTML = "⚠️ ТУПИК! НАЧНИ ЗАНОВО";
                 isLocked = true;
                 setTimeout(() => {
                     isLocked = false;
                     resetLevel();
-                }, 800);
+                }, 700);
             }
         }
 
@@ -418,7 +369,7 @@
             return false;
         }
 
-        function isPathComplete() {
+        function isAllFilled() {
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
                     if (board[r][c] === 0) return false;
@@ -430,7 +381,7 @@
         // ---- ПОДСКАЗКА ----
         function showHint() {
             if (isComplete) return;
-            hintCount++;
+
             // Ищем первую свободную клетку рядом с путём
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
@@ -446,10 +397,10 @@
                                 cells.forEach(cell => {
                                     if (parseInt(cell.dataset.r) === nr && parseInt(cell.dataset.c) === nc) {
                                         cell.classList.add('highlight');
-                                        setTimeout(() => cell.classList.remove('highlight'), 1000);
+                                        setTimeout(() => cell.classList.remove('highlight'), 800);
                                     }
                                 });
-                                gameStatusSpan.innerHTML = `💡 ПОДСКАЗКА: КЛЕТКА (${nr+1}, ${nc+1})`;
+                                gameStatusSpan.innerHTML = `💡 КЛЕТКА (${nr+1}, ${nc+1})`;
                                 return;
                             }
                         }
@@ -459,16 +410,16 @@
             gameStatusSpan.innerHTML = "😅 НЕТ ДОСТУПНЫХ КЛЕТОК";
         }
 
-        // ---- СБРОС УРОВНЯ ----
+        // ---- СБРОС ----
         function resetLevel() {
-            // Очищаем путь, оставляем старт и финиш
+            // Убираем путь, оставляем старт и финиш
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
                     if (board[r][c] === 2) board[r][c] = 0;
-                    if (board[r][c] === 3) board[r][c] = 3;
-                    if (board[r][c] === 4) board[r][c] = 4;
                 }
             }
+            board[start.r][start.c] = 3;
+            board[end.r][end.c] = 4;
             steps = 0;
             isComplete = false;
             isLocked = false;
@@ -486,8 +437,12 @@
         // ---- ИНИЦИАЛИЗАЦИЯ ----
         function init() {
             generateLevel();
+
             document.getElementById('resetBtn').addEventListener('click', resetLevel);
             document.getElementById('hintBtn').addEventListener('click', showHint);
+
+            // Адаптация размера поля
+            window.addEventListener('resize', render);
         }
 
         init();
