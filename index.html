@@ -194,16 +194,11 @@
             <button id="hintBtn">💡 ПОДСКАЗКА</button>
         </div>
 
-        <div class="status" id="gameStatus">🌀 ПРОВЕДИ ЛИНИЮ ОТ ТОЧКИ ДО ТОЧКИ</div>
+        <div class="status" id="gameStatus">🌀 ТЯНИ ЛИНИЮ ОТ ЗЕЛЁНОЙ К КРАСНОЙ</div>
     </div>
 </div>
 
 <script>
-    // ================================================================
-    //  СВЯЖИ ТОЧКИ (FLOW) — С ПРОВЕДЕНИЕМ ЛИНИИ
-    //  Зажимаешь на старте, тянешь по клеткам, отпускаешь
-    // ================================================================
-
     (function() {
         'use strict';
 
@@ -217,7 +212,6 @@
         let start = null;
         let end = null;
         let isComplete = false;
-        let isLocked = false;
         let isDrawing = false;
         let pathCells = [];
 
@@ -231,7 +225,6 @@
             size = Math.floor(Math.random() * (MAX_SIZE - MIN_SIZE + 1)) + MIN_SIZE;
             board = Array.from({ length: size }, () => Array(size).fill(0));
 
-            // Препятствия
             const blockCount = Math.floor(size * size * 0.08);
             let placed = 0;
             while (placed < blockCount) {
@@ -243,7 +236,6 @@
                 }
             }
 
-            // Старт и финиш на краях
             const freeEdges = [];
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
@@ -276,7 +268,6 @@
 
             steps = 0;
             isComplete = false;
-            isLocked = false;
             pathCells = [];
             render();
             updateUI();
@@ -305,95 +296,73 @@
                     else if (val === 4) cell.classList.add('end');
                     else if (val === 2) cell.classList.add('path');
 
-                    // События для рисования
-                    cell.addEventListener('mousedown', (e) => onCellDown(r, c, e));
-                    cell.addEventListener('mouseenter', (e) => onCellEnter(r, c, e));
-                    cell.addEventListener('mouseup', (e) => onCellUp(r, c, e));
-
-                    cell.addEventListener('touchstart', (e) => onCellDown(r, c, e));
-                    cell.addEventListener('touchmove', (e) => onCellTouchMove(r, c, e));
-                    cell.addEventListener('touchend', (e) => onCellUp(r, c, e));
-
                     boardEl.appendChild(cell);
                 }
             }
         }
 
-        // ---- РИСОВАНИЕ ЛИНИИ ----
-        function onCellDown(r, c, e) {
-            if (isComplete || isLocked) return;
-            if (board[r][c] === 1) return;
-
-            // Начинаем рисование только со старта
-            if (board[r][c] === 3) {
-                isDrawing = true;
-                pathCells = [{r, c}];
-                clearPath();
-                board[r][c] = 3;
-                steps = 0;
-                updateUI();
-                render();
-            }
-            e.preventDefault();
+        // ---- ЛОГИКА ПРОВЕДЕНИЯ ЛИНИИ ----
+        function getCell(r, c) {
+            return boardEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
         }
 
-        function onCellEnter(r, c, e) {
-            if (!isDrawing || isComplete || isLocked) return;
+        function startDrawing(r, c) {
+            if (isComplete) return;
             if (board[r][c] === 1) return;
+            if (board[r][c] !== 3) return;
+
+            isDrawing = true;
+            pathCells = [{r, c}];
+
+            // Очищаем старый путь
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    if (board[i][j] === 2) board[i][j] = 0;
+                }
+            }
+            board[start.r][start.c] = 3;
+            board[end.r][end.c] = 4;
+            steps = 0;
+            updateUI();
+            render();
+        }
+
+        function continueDrawing(r, c) {
+            if (!isDrawing || isComplete) return;
+            if (board[r][c] === 1) return;
+            if (board[r][c] === 3 && pathCells.length > 0) return;
+
+            const last = pathCells[pathCells.length - 1];
+            const dr = Math.abs(r - last.r);
+            const dc = Math.abs(c - last.c);
+            const isAdjacent = (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+
+            if (!isAdjacent) return;
+            if (pathCells.some(p => p.r === r && p.c === c)) return;
+
+            // Если это финиш
             if (board[r][c] === 4) {
-                // Попытка завершить линию
-                finishLine();
+                pathCells.push({r, c});
+                board[r][c] = 2;
+                steps++;
+                render();
+                finishDrawing();
                 return;
             }
+
+            pathCells.push({r, c});
+            board[r][c] = 2;
+            steps++;
+            updateUI();
+            render();
+        }
+
+        function finishDrawing() {
+            isDrawing = false;
 
             const last = pathCells[pathCells.length - 1];
             if (!last) return;
 
-            // Проверяем, что клетка соседняя (по горизонтали или вертикали)
-            const dr = Math.abs(r - last.r);
-            const dc = Math.abs(c - last.c);
-            if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
-                if (!pathCells.some(p => p.r === r && p.c === c)) {
-                    pathCells.push({r, c});
-                    board[r][c] = 2;
-                    steps++;
-                    updateUI();
-                    render();
-                }
-            }
-            e.preventDefault();
-        }
-
-        function onCellTouchMove(r, c, e) {
-            e.preventDefault();
-            const touch = e.touches[0];
-            const target = document.elementFromPoint(touch.clientX, touch.clientY);
-            if (target && target.classList.contains('cell')) {
-                const rr = parseInt(target.dataset.r);
-                const cc = parseInt(target.dataset.c);
-                if (!isNaN(rr) && !isNaN(cc)) {
-                    onCellEnter(rr, cc, e);
-                }
-            }
-        }
-
-        function onCellUp(r, c, e) {
-            if (isDrawing) {
-                finishLine();
-                isDrawing = false;
-            }
-            e.preventDefault();
-        }
-
-        function finishLine() {
-            isDrawing = false;
-            if (pathCells.length < 2) {
-                gameStatusSpan.innerHTML = "⚠️ ЛИНИЯ СЛИШКОМ КОРОТКАЯ";
-                return;
-            }
-
-            // Проверяем, что финиш достигнут
-            const last = pathCells[pathCells.length - 1];
             if (last.r === end.r && last.c === end.c) {
                 if (isAllFilled()) {
                     isComplete = true;
@@ -411,17 +380,6 @@
             render();
         }
 
-        // ---- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----
-        function clearPath() {
-            for (let r = 0; r < size; r++) {
-                for (let c = 0; c < size; c++) {
-                    if (board[r][c] === 2) board[r][c] = 0;
-                }
-            }
-            board[start.r][start.c] = 3;
-            board[end.r][end.c] = 4;
-        }
-
         function isAllFilled() {
             for (let r = 0; r < size; r++) {
                 for (let c = 0; c < size; c++) {
@@ -429,6 +387,85 @@
                 }
             }
             return true;
+        }
+
+        function resetLevel() {
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    if (board[i][j] === 2) board[i][j] = 0;
+                }
+            }
+            board[start.r][start.c] = 3;
+            board[end.r][end.c] = 4;
+            steps = 0;
+            isComplete = false;
+            pathCells = [];
+            updateUI();
+            render();
+            gameStatusSpan.innerHTML = "🌀 НАЧНИ ЗАНОВО";
+        }
+
+        // ---- ОБРАБОТЧИКИ СОБЫТИЙ ----
+        function setupEvents() {
+            let activeTouch = null;
+
+            boardEl.addEventListener('mousedown', (e) => {
+                const cell = e.target.closest('.cell');
+                if (!cell) return;
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+                startDrawing(r, c);
+            });
+
+            boardEl.addEventListener('mouseover', (e) => {
+                const cell = e.target.closest('.cell');
+                if (!cell) return;
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+                continueDrawing(r, c);
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDrawing) {
+                    finishDrawing();
+                }
+            });
+
+            boardEl.addEventListener('touchstart', (e) => {
+                const touch = e.touches[0];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                const cell = target?.closest('.cell');
+                if (!cell) return;
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+                startDrawing(r, c);
+                activeTouch = touch.identifier;
+                e.preventDefault();
+            }, { passive: false });
+
+            boardEl.addEventListener('touchmove', (e) => {
+                const touch = e.touches[0];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                const cell = target?.closest('.cell');
+                if (!cell) return;
+                const r = parseInt(cell.dataset.r);
+                const c = parseInt(cell.dataset.c);
+                continueDrawing(r, c);
+                e.preventDefault();
+            }, { passive: false });
+
+            document.addEventListener('touchend', (e) => {
+                if (isDrawing) {
+                    finishDrawing();
+                }
+                activeTouch = null;
+            });
+        }
+
+        // ---- UI ----
+        function updateUI() {
+            levelDisplay.textContent = level;
+            stepsDisplay.textContent = steps;
         }
 
         // ---- ПОДСКАЗКА ----
@@ -443,13 +480,11 @@
                             const nc = c + d[1];
                             if (nr < 0 || nr >= size || nc < 0 || nc >= size) continue;
                             if (board[nr][nc] === 0) {
-                                const cells = boardEl.querySelectorAll('.cell');
-                                cells.forEach(cell => {
-                                    if (parseInt(cell.dataset.r) === nr && parseInt(cell.dataset.c) === nc) {
-                                        cell.classList.add('highlight');
-                                        setTimeout(() => cell.classList.remove('highlight'), 800);
-                                    }
-                                });
+                                const cell = boardEl.querySelector(`.cell[data-r="${nr}"][data-c="${nc}"]`);
+                                if (cell) {
+                                    cell.classList.add('highlight');
+                                    setTimeout(() => cell.classList.remove('highlight'), 800);
+                                }
                                 gameStatusSpan.innerHTML = `💡 КЛЕТКА (${nr+1}, ${nc+1})`;
                                 return;
                             }
@@ -460,33 +495,12 @@
             gameStatusSpan.innerHTML = "😅 НЕТ ДОСТУПНЫХ КЛЕТОК";
         }
 
-        // ---- СБРОС ----
-        function resetLevel() {
-            clearPath();
-            board[start.r][start.c] = 3;
-            board[end.r][end.c] = 4;
-            steps = 0;
-            isComplete = false;
-            isLocked = false;
-            pathCells = [];
-            updateUI();
-            render();
-            gameStatusSpan.innerHTML = "🌀 НАЧНИ ЗАНОВО";
-        }
-
-        // ---- UI ----
-        function updateUI() {
-            levelDisplay.textContent = level;
-            stepsDisplay.textContent = steps;
-        }
-
         // ---- ИНИЦИАЛИЗАЦИЯ ----
         function init() {
             generateLevel();
-
+            setupEvents();
             document.getElementById('resetBtn').addEventListener('click', resetLevel);
             document.getElementById('hintBtn').addEventListener('click', showHint);
-
             window.addEventListener('resize', render);
         }
 
